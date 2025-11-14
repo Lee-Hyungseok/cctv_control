@@ -6,13 +6,13 @@ from typing import Dict, List
 class QLearningAgent:
     def __init__(self, n_actions: int, learning_rate: float = 0.1,
                  discount_factor: float = 0.95, epsilon: float = 1.0,
-                 epsilon_decay: float = 0.995, epsilon_min: float = 0.01):
+                 epsilon_decay: float = 0.9991, epsilon_min: float = 0.4):
         self.n_actions = n_actions
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
         self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay
-        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay  # 1000 에피소드 동안 1.0 -> 0.4
+        self.epsilon_min = epsilon_min  # 최종 epsilon 값 0.4
 
         # Q-table using defaultdict for dynamic state space
         self.q_table = defaultdict(lambda: np.zeros(n_actions))
@@ -21,6 +21,7 @@ class QLearningAgent:
         self.training_rewards = []
         self.training_losses = []
         self.episode_rewards = []
+        self.epsilon_history = []  # epsilon 변화 추적
 
     def _state_to_key(self, state: Dict) -> str:
         # Convert state dict to string key for Q-table
@@ -59,9 +60,12 @@ class QLearningAgent:
         self.training_rewards.append(reward)
         self.training_losses.append(abs(td_error))
 
-        # Decay epsilon
+    def decay_epsilon(self):
+        """에피소드 종료 시 epsilon 감소"""
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
+            self.epsilon = max(self.epsilon_min, self.epsilon)
+        self.epsilon_history.append(self.epsilon)
 
     def get_q_table_size(self) -> int:
         return len(self.q_table)
@@ -72,5 +76,6 @@ class QLearningAgent:
             'losses': self.training_losses,
             'episode_rewards': self.episode_rewards,
             'epsilon': self.epsilon,
+            'epsilon_history': self.epsilon_history,
             'q_table_size': self.get_q_table_size()
         }

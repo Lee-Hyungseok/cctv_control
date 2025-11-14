@@ -13,7 +13,17 @@ class CCTVEnvironment:
     def __init__(self, crime_probability: float = 0.05):
         self.directions = list(Direction)
         self.n_actions = len(self.directions)
-        self.crime_probability = crime_probability
+
+        # 각 방향별 범죄 발생률 설정
+        # 북쪽: 0.5%, 나머지: 0.1% ~ 0.2%
+        self.crime_probabilities = {
+            Direction.NORTH: 0.005,  # 0.5%
+            Direction.SOUTH: 0.001,  # 0.1%
+            Direction.EAST: 0.002,   # 0.2%
+            Direction.WEST: 0.0015   # 0.15%
+        }
+
+        self.crime_probability = crime_probability  # 하위 호환성을 위해 유지
         self.current_crimes = {direction: False for direction in self.directions}
         self.time_step = 0
         self.total_crimes = 0
@@ -44,8 +54,10 @@ class CCTVEnvironment:
 
         self.time_step += 1
 
-        # Episode ends after 365 days (365 * 24 * 60 = 525600 minutes)
-        done = self.time_step >= 525600
+        # Episode ends after 1 day (144 CCTV operations)
+        # 실제시간 1일 = 24시간 = 모델상 24분
+        # 10분마다 1회 동작 = 24분 동안 144회 동작
+        done = self.time_step >= 144
 
         state = self._get_state()
         info = {
@@ -58,7 +70,9 @@ class CCTVEnvironment:
 
     def _generate_crimes(self):
         for direction in self.directions:
-            if random.random() < self.crime_probability:
+            # 각 방향별로 다른 범죄 발생률 적용
+            crime_prob = self.crime_probabilities[direction]
+            if random.random() < crime_prob:
                 if not self.current_crimes[direction]:
                     self.current_crimes[direction] = True
                     self.total_crimes += 1

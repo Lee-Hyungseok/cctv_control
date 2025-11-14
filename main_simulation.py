@@ -22,7 +22,7 @@ class CCTVSimulation:
         # Animation data
         self.animation_data = []
 
-    def train_q_learning(self, episodes: int = 100) -> Dict:
+    def train_q_learning(self, episodes: int = 1000) -> Dict:
         print(f"Training Q-Learning agent for {episodes} episodes...")
 
         for episode in range(episodes):
@@ -41,105 +41,143 @@ class CCTVSimulation:
                 if done:
                     break
 
+            # 에피소드 종료 시 epsilon 감소
+            self.ql_agent.decay_epsilon()
+
             detection_rate = self.env.get_detection_probability()
             self.ql_results['detection_rates'].append(detection_rate)
             self.ql_results['total_rewards'].append(total_reward)
 
-            if episode % 10 == 0:
-                print(f"Episode {episode}: Detection Rate = {detection_rate:.3f}, Total Reward = {total_reward}")
+            if episode % 100 == 0:
+                print(f"Episode {episode}: Detection Rate = {detection_rate:.3f}, Total Reward = {total_reward}, Epsilon = {self.ql_agent.epsilon:.3f}")
 
         return self.ql_agent.get_training_metrics()
 
-    def evaluate_baseline(self) -> Dict:
-        print("Evaluating baseline sequential CCTV...")
+    def evaluate_baseline(self, eval_episodes: int = 90) -> Dict:
+        print(f"Evaluating baseline sequential CCTV for {eval_episodes} episodes (days)...")
 
-        state = self.env.reset()
-        self.baseline_agent.reset()
-        total_reward = 0
+        total_crimes_all = 0
+        detected_crimes_all = 0
+        total_rewards = []
 
-        while True:
-            action = self.baseline_agent.choose_action(state)
-            next_state, reward, done, info = self.env.step(action)
+        for episode in range(eval_episodes):
+            state = self.env.reset()
+            self.baseline_agent.reset()
+            total_reward = 0
 
-            total_reward += reward
-            state = next_state
+            while True:
+                action = self.baseline_agent.choose_action(state)
+                next_state, reward, done, info = self.env.step(action)
 
-            if done:
-                break
+                total_reward += reward
+                state = next_state
 
-        detection_rate = self.env.get_detection_probability()
-        self.baseline_results['detection_rates'].append(detection_rate)
-        self.baseline_results['total_rewards'].append(total_reward)
+                if done:
+                    break
 
-        return {
-            'detection_rate': detection_rate,
-            'total_reward': total_reward,
-            'total_crimes': info['total_crimes'],
-            'detected_crimes': info['detected_crimes']
-        }
+            total_crimes_all += info['total_crimes']
+            detected_crimes_all += info['detected_crimes']
+            total_rewards.append(total_reward)
 
-    def evaluate_q_learning(self) -> Dict:
-        print("Evaluating trained Q-Learning agent...")
+            if episode % 10 == 0:
+                print(f"Evaluation Day {episode+1}/{eval_episodes}: Crimes={info['total_crimes']}, Detected={info['detected_crimes']}")
 
-        state = self.env.reset()
-        total_reward = 0
-
-        while True:
-            action = self.ql_agent.choose_action(state, training=False)
-            next_state, reward, done, info = self.env.step(action)
-
-            total_reward += reward
-            state = next_state
-
-            if done:
-                break
-
-        detection_rate = self.env.get_detection_probability()
+        avg_detection_rate = detected_crimes_all / max(1, total_crimes_all)
+        self.baseline_results['detection_rates'].append(avg_detection_rate)
+        self.baseline_results['total_rewards'].append(sum(total_rewards))
 
         return {
-            'detection_rate': detection_rate,
-            'total_reward': total_reward,
-            'total_crimes': info['total_crimes'],
-            'detected_crimes': info['detected_crimes']
+            'detection_rate': avg_detection_rate,
+            'total_reward': sum(total_rewards),
+            'avg_reward_per_day': np.mean(total_rewards),
+            'total_crimes': total_crimes_all,
+            'detected_crimes': detected_crimes_all,
+            'eval_episodes': eval_episodes
         }
 
-    def create_visualization_data(self, steps: int = 600) -> List[Dict]:
-        # Create data for 10-minute visualization (600 steps representing 365 days)
-        print("Creating visualization data...")
+    def evaluate_q_learning(self, eval_episodes: int = 90) -> Dict:
+        print(f"Evaluating trained Q-Learning agent for {eval_episodes} episodes (days)...")
 
-        # Reset environment for visualization
-        state = self.env.reset()
-        self.baseline_agent.reset()
+        total_crimes_all = 0
+        detected_crimes_all = 0
+        total_rewards = []
+
+        for episode in range(eval_episodes):
+            state = self.env.reset()
+            total_reward = 0
+
+            while True:
+                action = self.ql_agent.choose_action(state, training=False)
+                next_state, reward, done, info = self.env.step(action)
+
+                total_reward += reward
+                state = next_state
+
+                if done:
+                    break
+
+            total_crimes_all += info['total_crimes']
+            detected_crimes_all += info['detected_crimes']
+            total_rewards.append(total_reward)
+
+            if episode % 10 == 0:
+                print(f"Evaluation Day {episode+1}/{eval_episodes}: Crimes={info['total_crimes']}, Detected={info['detected_crimes']}")
+
+        avg_detection_rate = detected_crimes_all / max(1, total_crimes_all)
+
+        return {
+            'detection_rate': avg_detection_rate,
+            'total_reward': sum(total_rewards),
+            'avg_reward_per_day': np.mean(total_rewards),
+            'total_crimes': total_crimes_all,
+            'detected_crimes': detected_crimes_all,
+            'eval_episodes': eval_episodes
+        }
+
+    def create_visualization_data(self, eval_episodes: int = 90) -> List[Dict]:
+        # Create data for 10-minute visualization (90 episodes = 90 days)
+        # 90 에피소드 * 144 스텝/에피소드 = 12960 스텝
+        print(f"Creating visualization data for {eval_episodes} episodes...")
 
         viz_data = []
+        episode_num = 0
 
-        for step in range(steps):
-            # Q-Learning decision
-            ql_action = self.ql_agent.choose_action(state, training=False)
+        for episode in range(eval_episodes):
+            state = self.env.reset()
+            self.baseline_agent.reset()
 
-            # Baseline decision
-            baseline_action = self.baseline_agent.choose_action(state)
+            step_in_episode = 0
+            while True:
+                # Q-Learning decision
+                ql_action = self.ql_agent.choose_action(state, training=False)
 
-            # Generate crimes for visualization
-            crimes = {}
-            for i, direction in enumerate(self.env.directions):
-                crimes[direction.name] = random.random() < self.crime_probability
+                # Baseline decision
+                baseline_action = self.baseline_agent.choose_action(state)
 
-            viz_data.append({
-                'step': step,
-                'ql_action': ql_action,
-                'baseline_action': baseline_action,
-                'crimes': crimes,
-                'ql_detection': crimes[list(crimes.keys())[ql_action]],
-                'baseline_detection': crimes[list(crimes.keys())[baseline_action]]
-            })
+                # Current crimes from state
+                crimes = {}
+                for i, direction in enumerate(self.env.directions):
+                    crimes[direction.name] = bool(state['crimes'][i])
 
-            # Step environment (using Q-Learning action for state progression)
-            state, _, done, _ = self.env.step(ql_action)
+                viz_data.append({
+                    'episode': episode,
+                    'step': step_in_episode,
+                    'global_step': len(viz_data),
+                    'ql_action': ql_action,
+                    'baseline_action': baseline_action,
+                    'crimes': crimes,
+                    'ql_detection': crimes[list(crimes.keys())[ql_action]],
+                    'baseline_detection': crimes[list(crimes.keys())[baseline_action]]
+                })
 
-            if done:
-                break
+                # Step environment (using Q-Learning action for state progression)
+                state, _, done, _ = self.env.step(ql_action)
+                step_in_episode += 1
 
+                if done:
+                    break
+
+        print(f"Created {len(viz_data)} frames of visualization data")
         return viz_data
 
     def plot_training_results(self, training_metrics: Dict):
@@ -171,12 +209,14 @@ class CCTVSimulation:
             axes[1, 0].grid(True)
 
         # Plot 4: Epsilon Decay
-        epsilon_values = [training_metrics['epsilon']] * len(self.ql_results['total_rewards'])
-        axes[1, 1].plot(epsilon_values)
-        axes[1, 1].set_title('Epsilon Value During Training')
-        axes[1, 1].set_xlabel('Episode')
-        axes[1, 1].set_ylabel('Epsilon')
-        axes[1, 1].grid(True)
+        if 'epsilon_history' in training_metrics and len(training_metrics['epsilon_history']) > 0:
+            axes[1, 1].plot(training_metrics['epsilon_history'])
+            axes[1, 1].set_title('Epsilon Value During Training')
+            axes[1, 1].set_xlabel('Episode')
+            axes[1, 1].set_ylabel('Epsilon')
+            axes[1, 1].axhline(y=0.4, color='r', linestyle='--', label='Min Epsilon (0.4)')
+            axes[1, 1].legend()
+            axes[1, 1].grid(True)
 
         plt.tight_layout()
         plt.savefig('/home/leehs8006/tch/cctv_control/training_results.png', dpi=300, bbox_inches='tight')
@@ -211,7 +251,8 @@ class CCTVSimulation:
             ax1.set_xlim(-2, 2)
             ax1.set_ylim(-2, 2)
             ax1.set_aspect('equal')
-            ax1.set_title(f'CCTV Monitoring - Step {frame+1}/600\n(Representing Day {int((frame+1)*365/600)})')
+            day_num = data['episode'] + 1
+            ax1.set_title(f'CCTV Monitoring - Day {day_num}, Step {data["step"]+1}/144')
 
             # Draw roads
             ax1.plot([-2, 2], [0, 0], 'k-', linewidth=8, alpha=0.3)  # East-West road
@@ -291,35 +332,45 @@ class CCTVSimulation:
                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
         # Create animation
-        ani = animation.FuncAnimation(fig, animate, frames=len(viz_data),
-                                    interval=1000, repeat=True)
+        # 90 에피소드 * 144 스텝 = 12960 프레임
+        # 10분(600초) 안에 재생하려면 fps = 12960/600 ≈ 22
+        fps = max(int(len(viz_data) / 600), 1)  # 최소 1 fps
+        print(f"Animation will use {fps} FPS for approximately 10 minutes playback")
 
-        # Save animation
-        print("Saving animation...")
-        ani.save('/home/leehs8006/tch/cctv_control/cctv_simulation.gif',
-                writer='pillow', fps=1)
-        print("Animation saved as cctv_simulation.gif")
+        ani = animation.FuncAnimation(fig, animate, frames=len(viz_data),
+                                    interval=1000/fps, repeat=True)
+
+        # Save animation as MP4
+        print("Saving animation as MP4 (this may take a few minutes)...")
+        ani.save('/home/leehs8006/tch/cctv_control/cctv_simulation.mp4',
+                writer='ffmpeg', fps=fps, bitrate=1800)
+        print(f"Animation saved as cctv_simulation.mp4 ({len(viz_data)} frames at {fps} FPS)")
 
         plt.show()
         return ani
 
-def main(episodes=100, create_video=True):
+def main(episodes=1000, eval_episodes=90, create_video=True):
     # Initialize simulation
     sim = CCTVSimulation(crime_probability=0.05)
 
     # Train Q-Learning agent
-    print(f"Training Q-Learning agent for {episodes} episodes...")
+    print(f"Training Q-Learning agent for {episodes} episodes (days)...")
     training_metrics = sim.train_q_learning(episodes=episodes)
+    print(f"\nTraining complete! Final epsilon: {training_metrics['epsilon']:.3f}")
+
+    # Plot training results
+    print("\nGenerating training plots...")
+    sim.plot_training_results(training_metrics)
 
     # Evaluate both systems
-    print("Evaluating both systems...")
-    ql_eval = sim.evaluate_q_learning()
-    baseline_eval = sim.evaluate_baseline()
+    print(f"\nEvaluating both systems for {eval_episodes} episodes (days)...")
+    ql_eval = sim.evaluate_q_learning(eval_episodes=eval_episodes)
+    baseline_eval = sim.evaluate_baseline(eval_episodes=eval_episodes)
 
     # Print comparison results
-    print("\n" + "="*50)
-    print("PERFORMANCE COMPARISON")
-    print("="*50)
+    print("\n" + "="*60)
+    print("PERFORMANCE COMPARISON (90-DAY EVALUATION)")
+    print("="*60)
     print(f"Q-Learning Detection Rate: {ql_eval['detection_rate']:.3f}")
     print(f"Sequential Detection Rate: {baseline_eval['detection_rate']:.3f}")
 
@@ -327,17 +378,20 @@ def main(episodes=100, create_video=True):
         improvement = ((ql_eval['detection_rate'] - baseline_eval['detection_rate']) / baseline_eval['detection_rate'] * 100)
         print(f"Improvement: {improvement:+.1f}%")
 
-    print(f"Q-Learning Total Reward: {ql_eval['total_reward']}")
+    print(f"\nQ-Learning Total Reward: {ql_eval['total_reward']}")
     print(f"Sequential Total Reward: {baseline_eval['total_reward']}")
+    print(f"\nQ-Learning Avg Reward/Day: {ql_eval['avg_reward_per_day']:.2f}")
+    print(f"Sequential Avg Reward/Day: {baseline_eval['avg_reward_per_day']:.2f}")
 
-    # Create visualization data
-    viz_data = sim.create_visualization_data(steps=600)
+    # Create visualization data for evaluation period
+    print(f"\nCreating visualization for {eval_episodes} days...")
+    viz_data = sim.create_visualization_data(eval_episodes=eval_episodes)
 
     # Create video if requested
-    animation = None
+    animation_obj = None
     if create_video:
-        print("Creating animation video...")
-        animation = sim.create_animation(viz_data)
+        print("\nCreating animation video (this may take several minutes)...")
+        animation_obj = sim.create_animation(viz_data)
 
     # Return comprehensive results for report generation
     comprehensive_results = {
@@ -346,10 +400,10 @@ def main(episodes=100, create_video=True):
         'q_learning_eval': ql_eval,
         'baseline_eval': baseline_eval,
         'visualization_data': viz_data,
-        'animation': animation,
+        'animation': animation_obj,
         'training_rewards': sim.ql_results['total_rewards'],
         'training_detection_rates': sim.ql_results['detection_rates'],
-        'epsilon_values': [training_metrics['epsilon']] * len(sim.ql_results['total_rewards'])
+        'epsilon_values': training_metrics.get('epsilon_history', [training_metrics['epsilon']] * len(sim.ql_results['total_rewards']))
     }
 
     return comprehensive_results
