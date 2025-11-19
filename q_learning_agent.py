@@ -5,14 +5,14 @@ from typing import Dict, List
 
 class QLearningAgent:
     def __init__(self, n_actions: int, learning_rate: float = 0.1,
-                 discount_factor: float = 0.95, epsilon: float = 1.0,
-                 epsilon_decay: float = 0.9991, epsilon_min: float = 0.4):
+                 discount_factor: float = 0.95, epsilon: float = 0.3,
+                 epsilon_decay: float = 1.0, epsilon_min: float = 0.3):
         self.n_actions = n_actions
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
-        self.epsilon = epsilon
-        self.epsilon_decay = epsilon_decay  # 1000 에피소드 동안 1.0 -> 0.4
-        self.epsilon_min = epsilon_min  # 최종 epsilon 값 0.4
+        self.epsilon = epsilon  # 고정된 0.3 (30% 랜덤 행동)
+        self.epsilon_decay = epsilon_decay  # 1.0으로 설정하여 decay 비활성화
+        self.epsilon_min = epsilon_min  # 0.3으로 고정
 
         # Q-table using defaultdict for dynamic state space
         self.q_table = defaultdict(lambda: np.zeros(n_actions))

@@ -20,7 +20,7 @@ from main_simulation import main as run_main_simulation
 from report_generator import CCTVReportGenerator
 
 
-def run_integrated_cctv_simulation(episodes=1000, eval_episodes=90, create_video=True):
+def run_integrated_cctv_simulation(episodes=3000, eval_episodes=90, create_video=True):
     """
     Run the complete integrated CCTV simulation workflow
 
@@ -133,8 +133,8 @@ Examples:
     parser.add_argument(
         '--episodes',
         type=int,
-        default=1000,
-        help='Number of training episodes (default: 1000)'
+        default=3000,
+        help='Number of training episodes (default: 3000)'
     )
 
     parser.add_argument(
@@ -174,7 +174,7 @@ Examples:
         print("❌ Error: Episodes must be at least 1")
         sys.exit(1)
 
-    if episodes > 2000:
+    if episodes > 5000:
         print("Warning: Large number of episodes may take a very long time")
         response = input("Continue? (y/N): ")
         if response.lower() != 'y':
