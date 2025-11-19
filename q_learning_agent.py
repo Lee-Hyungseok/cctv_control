@@ -5,14 +5,14 @@ from typing import Dict, List
 
 class QLearningAgent:
     def __init__(self, n_actions: int, learning_rate: float = 0.1,
-                 discount_factor: float = 0.95, epsilon: float = 0.3,
-                 epsilon_decay: float = 1.0, epsilon_min: float = 0.3):
+                 discount_factor: float = 0.95, epsilon: float = 0.5,
+                 epsilon_decay: float = 1.0, epsilon_min: float = 0.5):
         self.n_actions = n_actions
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
-        self.epsilon = epsilon  # 고정된 0.3 (30% 랜덤 행동)
+        self.epsilon = epsilon  # 고정된 0.5 (50% 랜덤 행동)
         self.epsilon_decay = epsilon_decay  # 1.0으로 설정하여 decay 비활성화
-        self.epsilon_min = epsilon_min  # 0.3으로 고정
+        self.epsilon_min = epsilon_min  # 0.5로 고정
 
         # Q-table using defaultdict for dynamic state space
         self.q_table = defaultdict(lambda: np.zeros(n_actions))
@@ -25,8 +25,13 @@ class QLearningAgent:
 
     def _state_to_key(self, state: Dict) -> str:
         # Convert state dict to string key for Q-table
-        crimes = tuple(state['crimes'])
-        return f"{crimes}"
+        # State now includes current_direction and crime_detected
+        current_dir = state['current_direction']
+        crime_detected = state['crime_detected']
+        time_step = state['time_step']
+        # Simplify time into time bins (e.g., every 10 steps)
+        time_bin = time_step // 10
+        return f"{current_dir}_{crime_detected}_{time_bin}"
 
     def choose_action(self, state: Dict, training: bool = True) -> int:
         state_key = self._state_to_key(state)

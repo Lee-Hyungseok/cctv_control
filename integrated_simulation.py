@@ -20,13 +20,13 @@ from main_simulation import main as run_main_simulation
 from report_generator import CCTVReportGenerator
 
 
-def run_integrated_cctv_simulation(episodes=3000, eval_episodes=90, create_video=True):
+def run_integrated_cctv_simulation(episodes=1000, eval_episodes=365, create_video=True):
     """
     Run the complete integrated CCTV simulation workflow
 
     Args:
         episodes (int): Number of training episodes (default: 1000)
-        eval_episodes (int): Number of evaluation episodes (default: 90)
+        eval_episodes (int): Number of evaluation episodes (default: 365)
         create_video (bool): Whether to create animation video (default: True)
 
     Returns:
@@ -122,7 +122,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python integrated_simulation.py                    # Default: 1000 training episodes, 90 eval episodes with video
+  python integrated_simulation.py                    # Default: 1000 training episodes, 365 eval episodes with video
   python integrated_simulation.py --episodes 500     # Run with 500 training episodes
   python integrated_simulation.py --no-video         # Skip video generation
   python integrated_simulation.py --quick            # Quick test: 100 training, 10 eval, no video
@@ -133,15 +133,15 @@ Examples:
     parser.add_argument(
         '--episodes',
         type=int,
-        default=3000,
-        help='Number of training episodes (default: 3000)'
+        default=1000,
+        help='Number of training episodes (default: 1000)'
     )
 
     parser.add_argument(
         '--eval-episodes',
         type=int,
-        default=90,
-        help='Number of evaluation episodes (default: 90)'
+        default=365,
+        help='Number of evaluation episodes (default: 365)'
     )
 
     parser.add_argument(

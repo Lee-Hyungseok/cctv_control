@@ -19,27 +19,35 @@ class CCTVSimulation:
         self.ql_results = {'detection_rates': [], 'total_rewards': []}
         self.baseline_results = {'detection_rates': [], 'total_rewards': []}
 
-        # Direction-wise statistics for training
+        # Training statistics with direction-wise tracking
         self.training_stats = {
             'q_learning': {
+                'total_crimes': 0,
+                'total_detections': 0,
                 'crimes_by_direction': {'NORTH': 0, 'SOUTH': 0, 'EAST': 0, 'WEST': 0},
                 'detections_by_direction': {'NORTH': 0, 'SOUTH': 0, 'EAST': 0, 'WEST': 0}
             },
             'baseline': {
+                'total_crimes': 0,
+                'total_detections': 0,
                 'crimes_by_direction': {'NORTH': 0, 'SOUTH': 0, 'EAST': 0, 'WEST': 0},
                 'detections_by_direction': {'NORTH': 0, 'SOUTH': 0, 'EAST': 0, 'WEST': 0}
             }
         }
 
-        # Evaluation statistics
+        # Evaluation statistics with direction-wise tracking
         self.eval_stats = {
             'q_learning': {
                 'episode_rewards': [],
+                'total_crimes': 0,
+                'total_detections': 0,
                 'crimes_by_direction': {'NORTH': 0, 'SOUTH': 0, 'EAST': 0, 'WEST': 0},
                 'detections_by_direction': {'NORTH': 0, 'SOUTH': 0, 'EAST': 0, 'WEST': 0}
             },
             'baseline': {
                 'episode_rewards': [],
+                'total_crimes': 0,
+                'total_detections': 0,
                 'crimes_by_direction': {'NORTH': 0, 'SOUTH': 0, 'EAST': 0, 'WEST': 0},
                 'detections_by_direction': {'NORTH': 0, 'SOUTH': 0, 'EAST': 0, 'WEST': 0}
             }
@@ -53,23 +61,16 @@ class CCTVSimulation:
         print("Also tracking Baseline performance during training...")
 
         for episode in range(episodes):
+            # 동일한 seed를 사용하여 Q-Learning과 Baseline이 같은 범죄 환경에서 비교되도록 함
+            episode_seed = episode
+
             # Q-Learning training episode
-            state = self.env.reset()
+            state = self.env.reset(seed=episode_seed)
             total_reward = 0
 
             while True:
                 action = self.ql_agent.choose_action(state, training=True)
-
-                # Track crimes before step
-                direction_names = ['NORTH', 'SOUTH', 'EAST', 'WEST']
-                for i, has_crime in enumerate(state['crimes']):
-                    if has_crime:
-                        self.training_stats['q_learning']['crimes_by_direction'][direction_names[i]] += 1
-                        # Check if detected
-                        if action == i:
-                            self.training_stats['q_learning']['detections_by_direction'][direction_names[i]] += 1
-
-                next_state, reward, done, _ = self.env.step(action)
+                next_state, reward, done, info = self.env.step(action)
 
                 self.ql_agent.learn(state, action, reward, next_state, done)
 
@@ -82,33 +83,38 @@ class CCTVSimulation:
             # 에피소드 종료 시 epsilon 감소
             self.ql_agent.decay_epsilon()
 
+            # Track statistics from env
+            self.training_stats['q_learning']['total_crimes'] += info['total_crimes']
+            self.training_stats['q_learning']['total_detections'] += info['detected_crimes']
+            for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
+                self.training_stats['q_learning']['crimes_by_direction'][direction] += info['crimes_by_direction'][direction]
+                self.training_stats['q_learning']['detections_by_direction'][direction] += info['detections_by_direction'][direction]
+
             detection_rate = self.env.get_detection_probability()
             self.ql_results['detection_rates'].append(detection_rate)
             self.ql_results['total_rewards'].append(total_reward)
 
-            # Baseline training episode (for comparison)
-            state = self.env.reset()
+            # Baseline training episode (for comparison) - 동일한 seed 사용
+            state = self.env.reset(seed=episode_seed)
             self.baseline_agent.reset()
             baseline_reward = 0
 
             while True:
                 action = self.baseline_agent.choose_action(state)
-
-                # Track crimes for baseline
-                for i, has_crime in enumerate(state['crimes']):
-                    if has_crime:
-                        self.training_stats['baseline']['crimes_by_direction'][direction_names[i]] += 1
-                        # Check if detected
-                        if action == i:
-                            self.training_stats['baseline']['detections_by_direction'][direction_names[i]] += 1
-
-                next_state, reward, done, _ = self.env.step(action)
+                next_state, reward, done, info = self.env.step(action)
 
                 baseline_reward += reward
                 state = next_state
 
                 if done:
                     break
+
+            # Track statistics from env
+            self.training_stats['baseline']['total_crimes'] += info['total_crimes']
+            self.training_stats['baseline']['total_detections'] += info['detected_crimes']
+            for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
+                self.training_stats['baseline']['crimes_by_direction'][direction] += info['crimes_by_direction'][direction]
+                self.training_stats['baseline']['detections_by_direction'][direction] += info['detections_by_direction'][direction]
 
             baseline_detection_rate = self.env.get_detection_probability()
             self.baseline_results['detection_rates'].append(baseline_detection_rate)
@@ -121,30 +127,22 @@ class CCTVSimulation:
 
         return self.ql_agent.get_training_metrics()
 
-    def evaluate_baseline(self, eval_episodes: int = 90) -> Dict:
+    def evaluate_baseline(self, eval_episodes: int = 365, start_seed: int = 10000) -> Dict:
         print(f"Evaluating baseline sequential CCTV for {eval_episodes} episodes (days)...")
 
         total_crimes_all = 0
         detected_crimes_all = 0
         total_rewards = []
-        direction_names = ['NORTH', 'SOUTH', 'EAST', 'WEST']
 
         for episode in range(eval_episodes):
-            state = self.env.reset()
+            # 평가 시에는 training과 다른 seed 범위 사용
+            episode_seed = start_seed + episode
+            state = self.env.reset(seed=episode_seed)
             self.baseline_agent.reset()
             total_reward = 0
 
             while True:
                 action = self.baseline_agent.choose_action(state)
-
-                # Track crimes for baseline evaluation
-                for i, has_crime in enumerate(state['crimes']):
-                    if has_crime:
-                        self.eval_stats['baseline']['crimes_by_direction'][direction_names[i]] += 1
-                        # Check if detected
-                        if action == i:
-                            self.eval_stats['baseline']['detections_by_direction'][direction_names[i]] += 1
-
                 next_state, reward, done, info = self.env.step(action)
 
                 total_reward += reward
@@ -158,12 +156,21 @@ class CCTVSimulation:
             total_rewards.append(total_reward)
             self.eval_stats['baseline']['episode_rewards'].append(total_reward)
 
+            # Accumulate direction-wise statistics
+            for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
+                self.eval_stats['baseline']['crimes_by_direction'][direction] += info['crimes_by_direction'][direction]
+                self.eval_stats['baseline']['detections_by_direction'][direction] += info['detections_by_direction'][direction]
+
             if episode % 10 == 0:
                 print(f"Evaluation Day {episode+1}/{eval_episodes}: Crimes={info['total_crimes']}, Detected={info['detected_crimes']}")
 
         avg_detection_rate = detected_crimes_all / max(1, total_crimes_all)
         self.baseline_results['detection_rates'].append(avg_detection_rate)
         self.baseline_results['total_rewards'].append(sum(total_rewards))
+
+        # Store in eval_stats for comparison
+        self.eval_stats['baseline']['total_crimes'] = total_crimes_all
+        self.eval_stats['baseline']['total_detections'] = detected_crimes_all
 
         return {
             'detection_rate': avg_detection_rate,
@@ -174,29 +181,21 @@ class CCTVSimulation:
             'eval_episodes': eval_episodes
         }
 
-    def evaluate_q_learning(self, eval_episodes: int = 90) -> Dict:
+    def evaluate_q_learning(self, eval_episodes: int = 365, start_seed: int = 10000) -> Dict:
         print(f"Evaluating trained Q-Learning agent for {eval_episodes} episodes (days)...")
 
         total_crimes_all = 0
         detected_crimes_all = 0
         total_rewards = []
-        direction_names = ['NORTH', 'SOUTH', 'EAST', 'WEST']
 
         for episode in range(eval_episodes):
-            state = self.env.reset()
+            # Baseline과 동일한 seed 사용
+            episode_seed = start_seed + episode
+            state = self.env.reset(seed=episode_seed)
             total_reward = 0
 
             while True:
                 action = self.ql_agent.choose_action(state, training=False)
-
-                # Track crimes for Q-learning evaluation
-                for i, has_crime in enumerate(state['crimes']):
-                    if has_crime:
-                        self.eval_stats['q_learning']['crimes_by_direction'][direction_names[i]] += 1
-                        # Check if detected
-                        if action == i:
-                            self.eval_stats['q_learning']['detections_by_direction'][direction_names[i]] += 1
-
                 next_state, reward, done, info = self.env.step(action)
 
                 total_reward += reward
@@ -210,10 +209,19 @@ class CCTVSimulation:
             total_rewards.append(total_reward)
             self.eval_stats['q_learning']['episode_rewards'].append(total_reward)
 
+            # Accumulate direction-wise statistics
+            for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
+                self.eval_stats['q_learning']['crimes_by_direction'][direction] += info['crimes_by_direction'][direction]
+                self.eval_stats['q_learning']['detections_by_direction'][direction] += info['detections_by_direction'][direction]
+
             if episode % 10 == 0:
                 print(f"Evaluation Day {episode+1}/{eval_episodes}: Crimes={info['total_crimes']}, Detected={info['detected_crimes']}")
 
         avg_detection_rate = detected_crimes_all / max(1, total_crimes_all)
+
+        # Store in eval_stats for comparison
+        self.eval_stats['q_learning']['total_crimes'] = total_crimes_all
+        self.eval_stats['q_learning']['total_detections'] = detected_crimes_all
 
         return {
             'detection_rate': avg_detection_rate,
@@ -224,9 +232,9 @@ class CCTVSimulation:
             'eval_episodes': eval_episodes
         }
 
-    def create_visualization_data(self, eval_episodes: int = 90, viz_days: int = 10) -> List[Dict]:
-        # Create data for 2-minute visualization (only last 10 days)
-        # 10 에피소드 * 144 스텝/에피소드 = 1440 스텝
+    def create_visualization_data(self, eval_episodes: int = 365, viz_days: int = 30, start_seed: int = 10000) -> List[Dict]:
+        # Create data for 2-minute visualization (only last 30 days)
+        # 30 에피소드 * 144 스텝/에피소드 = 4320 스텝
         print(f"Creating visualization data for last {viz_days} days of {eval_episodes} episodes...")
 
         viz_data = []
@@ -234,7 +242,9 @@ class CCTVSimulation:
         start_episode = max(0, eval_episodes - viz_days)
 
         for episode in range(start_episode, eval_episodes):
-            state = self.env.reset()
+            # 평가와 동일한 seed 사용
+            episode_seed = start_seed + episode
+            state = self.env.reset(seed=episode_seed)
             self.baseline_agent.reset()
 
             step_in_episode = 0
@@ -245,10 +255,10 @@ class CCTVSimulation:
                 # Baseline decision
                 baseline_action = self.baseline_agent.choose_action(state)
 
-                # Current crimes from state
+                # Get current crimes from environment (for visualization only)
                 crimes = {}
-                for i, direction in enumerate(self.env.directions):
-                    crimes[direction.name] = bool(state['crimes'][i])
+                for direction in self.env.directions:
+                    crimes[direction.name] = bool(self.env.current_crimes[direction])
 
                 viz_data.append({
                     'episode': episode - start_episode,  # 0부터 시작하도록 조정
@@ -272,129 +282,115 @@ class CCTVSimulation:
         return viz_data
 
     def print_evaluation_statistics_table(self):
-        """Print direction-wise crime and detection statistics for evaluation phase"""
+        """Print crime and detection statistics for evaluation phase"""
         print("\n" + "="*80)
-        print("EVALUATION PHASE - Direction-wise Crime and Detection Statistics")
+        print("EVALUATION PHASE - Crime and Detection Statistics")
         print("="*80)
 
-        print("\n--- Q-Learning Agent ---")
-        print(f"{'Direction':<10} {'Crimes':<15} {'Detections':<15} {'Detection Rate':<15}")
-        print("-" * 60)
-
         ql_stats = self.eval_stats['q_learning']
-        total_ql_crimes = sum(ql_stats['crimes_by_direction'].values())
-        total_ql_detections = sum(ql_stats['detections_by_direction'].values())
-
-        for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
-            crimes = ql_stats['crimes_by_direction'][direction]
-            detections = ql_stats['detections_by_direction'][direction]
-            rate = detections / crimes if crimes > 0 else 0.0
-            print(f"{direction:<10} {crimes:<15} {detections:<15} {rate:<15.3f}")
-
-        ql_total_rate = total_ql_detections / total_ql_crimes if total_ql_crimes > 0 else 0.0
-        print("-" * 60)
-        print(f"{'TOTAL':<10} {total_ql_crimes:<15} {total_ql_detections:<15} {ql_total_rate:<15.3f}")
-
-        print("\n--- Baseline (Sequential) Agent ---")
-        print(f"{'Direction':<10} {'Crimes':<15} {'Detections':<15} {'Detection Rate':<15}")
-        print("-" * 60)
-
         baseline_stats = self.eval_stats['baseline']
-        total_baseline_crimes = sum(baseline_stats['crimes_by_direction'].values())
-        total_baseline_detections = sum(baseline_stats['detections_by_direction'].values())
 
-        for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
-            crimes = baseline_stats['crimes_by_direction'][direction]
-            detections = baseline_stats['detections_by_direction'][direction]
-            rate = detections / crimes if crimes > 0 else 0.0
-            print(f"{direction:<10} {crimes:<15} {detections:<15} {rate:<15.3f}")
+        # Verify same crime environment
+        crimes_match = ql_stats['total_crimes'] == baseline_stats['total_crimes']
+        match_symbol = "✓" if crimes_match else "✗"
 
-        baseline_total_rate = total_baseline_detections / total_baseline_crimes if total_baseline_crimes > 0 else 0.0
-        print("-" * 60)
-        print(f"{'TOTAL':<10} {total_baseline_crimes:<15} {total_baseline_detections:<15} {baseline_total_rate:<15.3f}")
+        print(f"\n{match_symbol} Crime Environment: {'IDENTICAL' if crimes_match else 'DIFFERENT (ERROR!)'}")
+        print("-" * 80)
 
-        print("\n--- Comparison (Q-Learning vs Baseline) ---")
-        print(f"{'Direction':<10} {'QL Rate':<15} {'Baseline Rate':<15} {'Improvement':<15}")
-        print("-" * 60)
+        # Overall statistics
+        print(f"\n{'Metric':<30} {'Q-Learning':<20} {'Baseline':<20} {'Improvement':<15}")
+        print("-" * 80)
+
+        # Total crimes (should be identical)
+        print(f"{'Total Crimes':<30} {ql_stats['total_crimes']:<20} {baseline_stats['total_crimes']:<20} {'-':<15}")
+
+        # Detections
+        print(f"{'Detected Crimes':<30} {ql_stats['total_detections']:<20} {baseline_stats['total_detections']:<20} {'-':<15}")
+
+        # Detection rates
+        ql_rate = ql_stats['total_detections'] / max(1, ql_stats['total_crimes'])
+        bl_rate = baseline_stats['total_detections'] / max(1, baseline_stats['total_crimes'])
+        improvement = ((ql_rate - bl_rate) / bl_rate * 100) if bl_rate > 0 else 0.0
+
+        print(f"{'Detection Rate':<30} {ql_rate:<20.3f} {bl_rate:<20.3f} {improvement:+.2f}%")
+
+        # Direction-wise statistics
+        print("\n" + "-" * 80)
+        print("Direction-wise Detection Rates")
+        print("-" * 80)
+        print(f"{'Direction':<15} {'Crimes':<15} {'QL Detections':<20} {'BL Detections':<20} {'QL Rate':<15} {'BL Rate':<15}")
+        print("-" * 80)
 
         for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
             ql_crimes = ql_stats['crimes_by_direction'][direction]
-            ql_detections = ql_stats['detections_by_direction'][direction]
-            ql_rate = ql_detections / ql_crimes if ql_crimes > 0 else 0.0
-
             bl_crimes = baseline_stats['crimes_by_direction'][direction]
-            bl_detections = baseline_stats['detections_by_direction'][direction]
-            bl_rate = bl_detections / bl_crimes if bl_crimes > 0 else 0.0
+            ql_det = ql_stats['detections_by_direction'][direction]
+            bl_det = baseline_stats['detections_by_direction'][direction]
 
-            improvement = ((ql_rate - bl_rate) / bl_rate * 100) if bl_rate > 0 else 0.0
-            print(f"{direction:<10} {ql_rate:<15.3f} {bl_rate:<15.3f} {improvement:+.2f}%")
+            # Verify same crimes
+            crimes_str = f"{ql_crimes}" if ql_crimes == bl_crimes else f"{ql_crimes}/{bl_crimes}⚠"
 
-        overall_improvement = ((ql_total_rate - baseline_total_rate) / baseline_total_rate * 100) if baseline_total_rate > 0 else 0.0
-        print("-" * 60)
-        print(f"{'OVERALL':<10} {ql_total_rate:<15.3f} {baseline_total_rate:<15.3f} {overall_improvement:+.2f}%")
+            ql_dir_rate = ql_det / max(1, ql_crimes)
+            bl_dir_rate = bl_det / max(1, bl_crimes)
+
+            print(f"{direction:<15} {crimes_str:<15} {ql_det:<20} {bl_det:<20} {ql_dir_rate:<15.3f} {bl_dir_rate:<15.3f}")
+
         print("="*80 + "\n")
 
     def print_training_statistics_table(self):
-        """Print direction-wise crime and detection statistics for training phase"""
+        """Print crime and detection statistics for training phase"""
         print("\n" + "="*80)
-        print("TRAINING PHASE - Direction-wise Crime and Detection Statistics")
+        print("TRAINING PHASE - Crime and Detection Statistics")
         print("="*80)
 
-        print("\n--- Q-Learning Agent ---")
-        print(f"{'Direction':<10} {'Crimes':<15} {'Detections':<15} {'Detection Rate':<15}")
-        print("-" * 60)
-
         ql_stats = self.training_stats['q_learning']
-        total_ql_crimes = sum(ql_stats['crimes_by_direction'].values())
-        total_ql_detections = sum(ql_stats['detections_by_direction'].values())
-
-        for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
-            crimes = ql_stats['crimes_by_direction'][direction]
-            detections = ql_stats['detections_by_direction'][direction]
-            rate = detections / crimes if crimes > 0 else 0.0
-            print(f"{direction:<10} {crimes:<15} {detections:<15} {rate:<15.3f}")
-
-        ql_total_rate = total_ql_detections / total_ql_crimes if total_ql_crimes > 0 else 0.0
-        print("-" * 60)
-        print(f"{'TOTAL':<10} {total_ql_crimes:<15} {total_ql_detections:<15} {ql_total_rate:<15.3f}")
-
-        print("\n--- Baseline (Sequential) Agent ---")
-        print(f"{'Direction':<10} {'Crimes':<15} {'Detections':<15} {'Detection Rate':<15}")
-        print("-" * 60)
-
         baseline_stats = self.training_stats['baseline']
-        total_baseline_crimes = sum(baseline_stats['crimes_by_direction'].values())
-        total_baseline_detections = sum(baseline_stats['detections_by_direction'].values())
 
-        for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
-            crimes = baseline_stats['crimes_by_direction'][direction]
-            detections = baseline_stats['detections_by_direction'][direction]
-            rate = detections / crimes if crimes > 0 else 0.0
-            print(f"{direction:<10} {crimes:<15} {detections:<15} {rate:<15.3f}")
+        # Verify same crime environment
+        crimes_match = ql_stats['total_crimes'] == baseline_stats['total_crimes']
+        match_symbol = "✓" if crimes_match else "✗"
 
-        baseline_total_rate = total_baseline_detections / total_baseline_crimes if total_baseline_crimes > 0 else 0.0
-        print("-" * 60)
-        print(f"{'TOTAL':<10} {total_baseline_crimes:<15} {total_baseline_detections:<15} {baseline_total_rate:<15.3f}")
+        print(f"\n{match_symbol} Crime Environment: {'IDENTICAL' if crimes_match else 'DIFFERENT (ERROR!)'}")
+        print("-" * 80)
 
-        print("\n--- Comparison (Q-Learning vs Baseline) ---")
-        print(f"{'Direction':<10} {'QL Rate':<15} {'Baseline Rate':<15} {'Improvement':<15}")
-        print("-" * 60)
+        # Overall statistics
+        print(f"\n{'Metric':<30} {'Q-Learning':<20} {'Baseline':<20} {'Improvement':<15}")
+        print("-" * 80)
+
+        # Total crimes (should be identical)
+        print(f"{'Total Crimes':<30} {ql_stats['total_crimes']:<20} {baseline_stats['total_crimes']:<20} {'-':<15}")
+
+        # Detections
+        print(f"{'Detected Crimes':<30} {ql_stats['total_detections']:<20} {baseline_stats['total_detections']:<20} {'-':<15}")
+
+        # Detection rates
+        ql_rate = ql_stats['total_detections'] / max(1, ql_stats['total_crimes'])
+        bl_rate = baseline_stats['total_detections'] / max(1, baseline_stats['total_crimes'])
+        improvement = ((ql_rate - bl_rate) / bl_rate * 100) if bl_rate > 0 else 0.0
+
+        print(f"{'Detection Rate':<30} {ql_rate:<20.3f} {bl_rate:<20.3f} {improvement:+.2f}%")
+
+        # Direction-wise statistics
+        print("\n" + "-" * 80)
+        print("Direction-wise Detection Rates")
+        print("-" * 80)
+        print(f"{'Direction':<15} {'Crimes':<15} {'QL Detections':<20} {'BL Detections':<20} {'QL Rate':<15} {'BL Rate':<15}")
+        print("-" * 80)
 
         for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
             ql_crimes = ql_stats['crimes_by_direction'][direction]
-            ql_detections = ql_stats['detections_by_direction'][direction]
-            ql_rate = ql_detections / ql_crimes if ql_crimes > 0 else 0.0
-
             bl_crimes = baseline_stats['crimes_by_direction'][direction]
-            bl_detections = baseline_stats['detections_by_direction'][direction]
-            bl_rate = bl_detections / bl_crimes if bl_crimes > 0 else 0.0
+            ql_det = ql_stats['detections_by_direction'][direction]
+            bl_det = baseline_stats['detections_by_direction'][direction]
 
-            improvement = ((ql_rate - bl_rate) / bl_rate * 100) if bl_rate > 0 else 0.0
-            print(f"{direction:<10} {ql_rate:<15.3f} {bl_rate:<15.3f} {improvement:+.2f}%")
+            # Verify same crimes
+            crimes_str = f"{ql_crimes}" if ql_crimes == bl_crimes else f"{ql_crimes}/{bl_crimes}⚠"
 
-        overall_improvement = ((ql_total_rate - baseline_total_rate) / baseline_total_rate * 100) if baseline_total_rate > 0 else 0.0
-        print("-" * 60)
-        print(f"{'OVERALL':<10} {ql_total_rate:<15.3f} {baseline_total_rate:<15.3f} {overall_improvement:+.2f}%")
+            ql_dir_rate = ql_det / max(1, ql_crimes)
+            bl_dir_rate = bl_det / max(1, bl_crimes)
+
+            print(f"{direction:<15} {crimes_str:<15} {ql_det:<20} {bl_det:<20} {ql_dir_rate:<15.3f} {bl_dir_rate:<15.3f}")
+
         print("="*80 + "\n")
 
     def plot_evaluation_results(self, eval_episodes: int):
@@ -444,21 +440,30 @@ class CCTVSimulation:
     def plot_training_results(self, training_metrics: Dict):
         fig, axes = plt.subplots(2, 3, figsize=(20, 10))
 
-        # Plot 1: Episode Rewards Comparison (Q-Learning vs Baseline)
-        axes[0, 0].plot(self.ql_results['total_rewards'], label='Q-Learning', color='blue', alpha=0.7)
-        axes[0, 0].plot(self.baseline_results['total_rewards'], label='Baseline', color='red', alpha=0.7)
-        axes[0, 0].set_title('Total Rewards per Episode - Training Comparison')
+        # Plot 1: Cumulative Rewards Comparison (Q-Learning vs Baseline)
+        ql_cumulative_rewards = np.cumsum(self.ql_results['total_rewards'])
+        baseline_cumulative_rewards = np.cumsum(self.baseline_results['total_rewards'])
+        axes[0, 0].plot(ql_cumulative_rewards, label='Q-Learning', color='blue', alpha=0.7)
+        axes[0, 0].plot(baseline_cumulative_rewards, label='Baseline', color='red', alpha=0.7)
+        axes[0, 0].set_title('Cumulative Rewards - Training Comparison')
         axes[0, 0].set_xlabel('Episode')
-        axes[0, 0].set_ylabel('Total Reward')
+        axes[0, 0].set_ylabel('Cumulative Reward')
         axes[0, 0].legend()
         axes[0, 0].grid(True)
 
-        # Plot 2: Detection Rates Comparison
-        axes[0, 1].plot(self.ql_results['detection_rates'], label='Q-Learning', color='blue', alpha=0.7)
-        axes[0, 1].plot(self.baseline_results['detection_rates'], label='Baseline', color='red', alpha=0.7)
-        axes[0, 1].set_title('Detection Rate per Episode - Training Comparison')
+        # Plot 2: Cumulative Detection Rates Comparison
+        # Calculate cumulative detection rates
+        ql_cumulative_det_rates = []
+        baseline_cumulative_det_rates = []
+        for i in range(1, len(self.ql_results['detection_rates']) + 1):
+            ql_cumulative_det_rates.append(np.mean(self.ql_results['detection_rates'][:i]))
+            baseline_cumulative_det_rates.append(np.mean(self.baseline_results['detection_rates'][:i]))
+
+        axes[0, 1].plot(ql_cumulative_det_rates, label='Q-Learning', color='blue', alpha=0.7)
+        axes[0, 1].plot(baseline_cumulative_det_rates, label='Baseline', color='red', alpha=0.7)
+        axes[0, 1].set_title('Cumulative Average Detection Rate - Training Comparison')
         axes[0, 1].set_xlabel('Episode')
-        axes[0, 1].set_ylabel('Detection Rate')
+        axes[0, 1].set_ylabel('Cumulative Avg Detection Rate')
         axes[0, 1].legend()
         axes[0, 1].grid(True)
 
@@ -691,7 +696,7 @@ class CCTVSimulation:
 
         return None  # No animation object needed with direct ffmpeg encoding
 
-def main(episodes=3000, eval_episodes=90, create_video=True):
+def main(episodes=1000, eval_episodes=365, create_video=True):
     # Initialize simulation
     sim = CCTVSimulation(crime_probability=0.05)
 
@@ -721,7 +726,7 @@ def main(episodes=3000, eval_episodes=90, create_video=True):
 
     # Print comparison results
     print("\n" + "="*60)
-    print("PERFORMANCE COMPARISON (90-DAY EVALUATION)")
+    print(f"PERFORMANCE COMPARISON ({eval_episodes}-DAY EVALUATION)")
     print("="*60)
     print(f"Q-Learning Detection Rate: {ql_eval['detection_rate']:.3f}")
     print(f"Sequential Detection Rate: {baseline_eval['detection_rate']:.3f}")
@@ -735,9 +740,9 @@ def main(episodes=3000, eval_episodes=90, create_video=True):
     print(f"\nQ-Learning Avg Reward/Day: {ql_eval['avg_reward_per_day']:.2f}")
     print(f"Sequential Avg Reward/Day: {baseline_eval['avg_reward_per_day']:.2f}")
 
-    # Create visualization data for evaluation period (last 10 days only)
-    print(f"\nCreating visualization for last 10 days of {eval_episodes} days evaluation...")
-    viz_data = sim.create_visualization_data(eval_episodes=eval_episodes, viz_days=10)
+    # Create visualization data for evaluation period (last 30 days only)
+    print(f"\nCreating visualization for last 30 days of {eval_episodes} days evaluation...")
+    viz_data = sim.create_visualization_data(eval_episodes=eval_episodes, viz_days=30)
 
     # Create video if requested
     animation_obj = None

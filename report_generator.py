@@ -8,31 +8,54 @@ from typing import Dict
 class CCTVReportGenerator:
     def __init__(self, main_results: Dict):
         self.results = main_results
+        self.simulation = main_results['simulation']
         self.training_results = main_results['training_metrics']
         self.ql_eval = main_results['q_learning_eval']
         self.baseline_eval = main_results['baseline_eval']
         self.viz_data = main_results['visualization_data']
 
+        # Extract direction-wise statistics from simulation object
+        self.eval_stats = self.simulation.eval_stats
+        self.training_stats = self.simulation.training_stats
+
     def create_comprehensive_performance_plots(self):
         """Create detailed performance analysis with 9 subplots"""
         fig = plt.figure(figsize=(20, 16))
 
-        # Plot 1: Training Rewards
+        # Plot 1: Training Rewards (Cumulative)
         plt.subplot(3, 3, 1)
         training_rewards = self.results['training_rewards']
-        plt.plot(training_rewards, 'b-', linewidth=2)
-        plt.title('Training Episode Rewards', fontsize=14, fontweight='bold')
+        cumulative_rewards = np.cumsum(training_rewards)
+        plt.plot(cumulative_rewards, 'b-', linewidth=2)
+        plt.title('Cumulative Training Rewards', fontsize=14, fontweight='bold')
         plt.xlabel('Episode')
-        plt.ylabel('Total Reward')
+        plt.ylabel('Cumulative Reward')
         plt.grid(True, alpha=0.3)
 
-        # Plot 2: Training Detection Rates
+        # Plot 2: Cumulative Detection Rate During Training
         plt.subplot(3, 3, 2)
+        # Calculate cumulative detection rate from training stats
+        total_detections = self.training_stats['q_learning']['total_detections']
+        total_crimes = self.training_stats['q_learning']['total_crimes']
+        cumulative_detection_rate = total_detections / max(1, total_crimes)
+
+        # For visualization, show moving average of detection rates
         detection_rates = self.results['training_detection_rates']
-        plt.plot(detection_rates, 'g-', linewidth=2)
-        plt.title('Training Detection Rates', fontsize=14, fontweight='bold')
+        window = min(50, len(detection_rates) // 10)
+        if window > 1:
+            smoothed_rates = [np.mean(detection_rates[max(0, i-window):i+1])
+                             for i in range(len(detection_rates))]
+            plt.plot(smoothed_rates, 'g-', linewidth=2)
+            plt.title(f'Training Detection Rate (MA-{window})', fontsize=14, fontweight='bold')
+        else:
+            plt.plot(detection_rates, 'g-', linewidth=2)
+            plt.title('Training Detection Rate', fontsize=14, fontweight='bold')
+
+        plt.axhline(y=cumulative_detection_rate, color='r', linestyle='--',
+                   label=f'Overall: {cumulative_detection_rate:.3f}', linewidth=2)
         plt.xlabel('Episode')
         plt.ylabel('Detection Rate')
+        plt.legend()
         plt.grid(True, alpha=0.3)
 
         # Plot 3: Epsilon Decay
@@ -89,22 +112,51 @@ class CCTVReportGenerator:
             plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(detected_crimes)*0.01,
                     f'{crimes:.0f}', ha='center', va='bottom', fontweight='bold', fontsize=12)
 
-        # Plot 7: Action Distribution Analysis
+        # Plot 7: Direction-wise Detection Rates (Q-Learning Evaluation)
         plt.subplot(3, 3, 7)
-        if len(self.viz_data) >= 1440:  # At least one day of data
-            baseline_actions = [d['baseline_action'] for d in self.viz_data[:1440]]
-            action_counts = [baseline_actions.count(i) for i in range(4)]
-            directions = ['North', 'South', 'East', 'West']
-            plt.pie(action_counts, labels=directions, autopct='%1.1f%%', startangle=90)
-            plt.title('Baseline Action Distribution\n(First Day)', fontsize=14, fontweight='bold')
+        directions = ['NORTH', 'SOUTH', 'EAST', 'WEST']
+        ql_rates = []
+        for direction in directions:
+            crimes = self.eval_stats['q_learning']['crimes_by_direction'][direction]
+            detections = self.eval_stats['q_learning']['detections_by_direction'][direction]
+            rate = detections / max(1, crimes)
+            ql_rates.append(rate)
 
-        # Plot 8: Q-Learning Action Distribution
+        x_pos = np.arange(len(directions))
+        bars = plt.bar(x_pos, ql_rates, color=['#ff7f7f', '#7f7fff', '#7fff7f', '#ffbf7f'],
+                      alpha=0.8, edgecolor='black', linewidth=2)
+        plt.title('Q-Learning Detection by Direction\n(Evaluation)', fontsize=14, fontweight='bold')
+        plt.xlabel('Direction')
+        plt.ylabel('Detection Rate')
+        plt.xticks(x_pos, directions)
+        plt.ylim(0, 1.0)
+        plt.grid(True, alpha=0.3, axis='y')
+
+        for bar, rate in zip(bars, ql_rates):
+            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
+                    f'{rate:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=10)
+
+        # Plot 8: Direction-wise Detection Rates (Baseline Evaluation)
         plt.subplot(3, 3, 8)
-        if len(self.viz_data) >= 1440:  # At least one day of data
-            ql_actions = [d['ql_action'] for d in self.viz_data[:1440]]
-            action_counts = [ql_actions.count(i) for i in range(4)]
-            plt.pie(action_counts, labels=directions, autopct='%1.1f%%', startangle=90)
-            plt.title('Q-Learning Action Distribution\n(First Day)', fontsize=14, fontweight='bold')
+        baseline_rates = []
+        for direction in directions:
+            crimes = self.eval_stats['baseline']['crimes_by_direction'][direction]
+            detections = self.eval_stats['baseline']['detections_by_direction'][direction]
+            rate = detections / max(1, crimes)
+            baseline_rates.append(rate)
+
+        bars = plt.bar(x_pos, baseline_rates, color=['#ff7f7f', '#7f7fff', '#7fff7f', '#ffbf7f'],
+                      alpha=0.8, edgecolor='black', linewidth=2)
+        plt.title('Baseline Detection by Direction\n(Evaluation)', fontsize=14, fontweight='bold')
+        plt.xlabel('Direction')
+        plt.ylabel('Detection Rate')
+        plt.xticks(x_pos, directions)
+        plt.ylim(0, 1.0)
+        plt.grid(True, alpha=0.3, axis='y')
+
+        for bar, rate in zip(bars, baseline_rates):
+            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
+                    f'{rate:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=10)
 
         # Plot 9: Performance Improvement
         plt.subplot(3, 3, 9)
@@ -240,6 +292,28 @@ PERFORMANCE IMPROVEMENT
 
         report += f"""
 
+DIRECTION-WISE PERFORMANCE (EVALUATION PHASE)
+{'='*46}
+
+Q-Learning System:
+"""
+        for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
+            crimes = self.eval_stats['q_learning']['crimes_by_direction'][direction]
+            detections = self.eval_stats['q_learning']['detections_by_direction'][direction]
+            rate = detections / max(1, crimes)
+            report += f"• {direction:6s}: {detections:4d}/{crimes:4d} crimes detected ({rate:.3f})\n"
+
+        report += f"""
+Sequential Baseline System:
+"""
+        for direction in ['NORTH', 'SOUTH', 'EAST', 'WEST']:
+            crimes = self.eval_stats['baseline']['crimes_by_direction'][direction]
+            detections = self.eval_stats['baseline']['detections_by_direction'][direction]
+            rate = detections / max(1, crimes)
+            report += f"• {direction:6s}: {detections:4d}/{crimes:4d} crimes detected ({rate:.3f})\n"
+
+        report += f"""
+
 TECHNICAL ANALYSIS
 {'='*21}
 
@@ -257,10 +331,11 @@ Learning Characteristics:
 
 ANIMATION RESULTS
 {'='*20}
-• Video Duration: 10 minutes (600 frames)
-• Time Compression: 365 days → 10 minutes (876:1 ratio)
+• Visualization Period: Last 30 days of {self.ql_eval['eval_episodes']}-day evaluation
+• Video Duration: ~2 minutes
+• Frames Generated: {len(self.viz_data)}
 • Video File: cctv_simulation.mp4
-• Frame Rate: 1 FPS (1 second per frame)
+• Shows both Q-Learning and Baseline decisions side-by-side
 
 CONCLUSIONS
 {'='*15}
@@ -288,15 +363,18 @@ RECOMMENDATIONS
 
 FILES GENERATED
 {'='*18}
-• comprehensive_performance_analysis.png - Detailed 9-panel performance analysis
+• comprehensive_performance_analysis.png - 9-panel performance analysis with direction-wise statistics
 • intersection_comparison.png - Visual system comparison
-• cctv_simulation.mp4 - 10-minute animation video (365 days compressed)
+• cctv_simulation.mp4 - 2-minute animation video (last 30 days of evaluation)
 • evaluation_report.txt - This comprehensive report
+• training_results.png - Training performance graphs
+• evaluation_results.png - Evaluation performance graphs
 
 Report generated on: {np.datetime64('today')}
-Simulation Duration: 365 days (525,600 minutes)
+Evaluation Period: {self.ql_eval['eval_episodes']} days
 Crime Probability: 5%
 Training Episodes: {len(self.results['training_rewards'])}
+Total Crimes (Evaluation): {self.ql_eval['total_crimes']}
 """
 
         with open('/home/leehs8006/tch/cctv_control/evaluation_report.txt', 'w') as f:
